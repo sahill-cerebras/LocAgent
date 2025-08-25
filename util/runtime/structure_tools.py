@@ -146,17 +146,19 @@ _STRUCTURE_EXPLORER_PARAMETERS = {
             'description': (
                 "List of entity types (e.g., 'class', 'function', 'file', 'directory') to include in the traversal. If None, all entity types are included."
             ),
-            'type': ['array', 'null'],
+            # 'type': ['array', 'null'],    #OPENAI
+            "type": "array",    #GEMINI
             'items': {'type': 'string'},
-            'default': None,
+            # 'default': None,      #OPENAI
         },
         'dependency_type_filter': {
             'description': (
                 "List of dependency types (e.g., 'contains', 'imports', 'invokes', 'inherits') to include in the traversal. If None, all dependency types are included."
             ),
-            'type': ['array', 'null'],
+            # 'type': ['array', 'null'],    #OPENAI
+            "type": "array",    #GEMINI
             'items': {'type': 'string'},
-            'default': None,
+            # 'default': None,      #OPENAI
         },
     },
     'required': ['start_entities'],

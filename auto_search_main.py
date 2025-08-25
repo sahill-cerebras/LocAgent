@@ -34,6 +34,7 @@ from plugins.location_tools.repo_ops.repo_ops import (
     reset_current_issue,
 )
 import litellm
+
 from litellm import Message as LiteLLMMessage
 from openai import APITimeoutError
 from evaluation.eval_metric import filtered_instances
@@ -471,7 +472,8 @@ def run_localize(rank, args, bug_queue, log_queue, output_file_lock, traj_file_l
             with output_file_lock:
                 append_to_jsonl(loc_res, args.output_file)
 
-            cost = calc_cost(args.model, total_prompt_tokens, total_completion_tokens)
+            # cost = calc_cost(args.model, total_prompt_tokens, total_completion_tokens)
+            cost = 0 # dummy cost
             loc_res['usage'] = {'cost($)': f'{round(cost, 5)}', 'prompt_tokens': total_prompt_tokens,
                                 'completion_tokens': total_completion_tokens}
             loc_res['loc_trajs'] = loc_trajs
@@ -483,7 +485,26 @@ def run_localize(rank, args, bug_queue, log_queue, output_file_lock, traj_file_l
 
 
 def localize(args):
-    bench_data = load_dataset(args.dataset, split=args.split)
+    """Load dataset from HF hub or from a local on-disk dataset path, then run localization."""
+    # Try local on-disk dataset if a directory path is provided; else use hub
+    if os.path.isdir(args.dataset) and os.path.exists(os.path.join(args.dataset, 'dataset_info.json')):
+        from datasets import load_from_disk, DatasetDict
+        logging.info(f"Loading dataset from local disk: {args.dataset}")
+        loaded = load_from_disk(args.dataset)
+        if isinstance(loaded, DatasetDict):
+            # Use requested split if present, otherwise pick the first available split
+            if args.split in loaded:
+                bench_data = loaded[args.split]
+            else:
+                first_split = next(iter(loaded.keys()))
+                logging.warning(f"Split '{args.split}' not found in local dataset. Using split '{first_split}' instead.")
+                bench_data = loaded[first_split]
+        else:
+            # Already a Dataset (single split)
+            bench_data = loaded
+    else:
+        logging.info(f"Loading dataset from hub: {args.dataset} (split={args.split})")
+        bench_data = load_dataset(args.dataset, split=args.split)
     bench_tests = filter_dataset(bench_data, 'instance_id', args.used_list)
     if args.eval_n_limit:
         eval_n_limit = min(args.eval_n_limit, len(bench_tests))
@@ -599,6 +620,10 @@ def main():
                  "azure/gpt-4o", "openai/gpt-4o-2024-05-13",
                  "deepseek/deepseek-chat", "deepseek-ai/DeepSeek-R1",
                  "litellm_proxy/claude-3-5-sonnet-20241022", "litellm_proxy/gpt-4o-2024-05-13", "litellm_proxy/o3-mini-2025-01-31",
+                 # cerebras
+                 "cerebras/llama3-70b-instruct", "cerebras/llama-3.3-70b",
+                 # gemini (Google) via LiteLLM
+                 "gemini/gemini-pro", "gemini/gemini-2.5-flash", "gemini/gemini-2.5-pro", "gemini/gemini-2.0-flash",
                  # fine-tuned model
                  "openai/qwen-7B", "openai/qwen-7B-128k", "openai/ft-qwen-7B", "openai/ft-qwen-7B-128k",
                  "openai/qwen-32B", "openai/qwen-32B-128k", "openai/ft-qwen-32B", "openai/ft-qwen-32B-128k",
