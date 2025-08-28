@@ -17,7 +17,8 @@ def list_folders(path):
 
 
 def run(rank, repo_queue, repo_path, out_path,
-        download_repo=False, instance_data=None):
+    download_repo=False, instance_data=None,
+    files_only=False, include_imports=True):
     while True:
         try:
             repo_name = repo_queue.get_nowait()
@@ -47,7 +48,12 @@ def run(rank, repo_queue, repo_path, out_path,
 
         print(f'[{rank}] Start process {repo_name}')
         try:
-            G = build_graph(repo_dir, global_import=True)
+            G = build_graph(
+                repo_dir,
+                global_import=True,
+                files_only=files_only,
+                include_imports=include_imports,
+            )
             with open(output_file, 'wb') as f:
                 pickle.dump(G, f)
             print(f'[{rank}] Processed {repo_name}')
@@ -68,6 +74,10 @@ if __name__ == '__main__':
                         help='The base directory where the generated graph index will be saved.')
     parser.add_argument('--instance_id_path', type=str, default='', 
                         help='Path to a file containing a list of selected instance IDs.')
+    parser.add_argument('--files_only', action='store_true',
+                        help='Build only directory/file nodes and file-level import edges (faster).')
+    parser.add_argument('--no_imports', action='store_true',
+                        help='Skip parsing import edges (fastest with --files_only).')
     args = parser.parse_args()
 
     
@@ -79,6 +89,8 @@ if __name__ == '__main__':
     if args.download_repo:
         selected_instance_data = {}
         bench_data = load_dataset(args.dataset, split=args.split)
+        # from datasets import load_from_disk
+        # bench_data = load_from_disk(args.dataset)[args.split]
         if args.instance_id_path and osp.exists(args.instance_id_path):
             with open(args.instance_id_path, 'r') as f:
                 repo_folders = json.loads(f.read())
@@ -112,8 +124,9 @@ if __name__ == '__main__':
     mp.spawn(
         run,
         nprocs=args.num_processes,
-        args=(queue, args.repo_path, args.index_dir,
-              args.download_repo, selected_instance_data),
+      args=(queue, args.repo_path, args.index_dir,
+          args.download_repo, selected_instance_data,
+          args.files_only, not args.no_imports),
         join=True
     )
 

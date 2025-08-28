@@ -622,8 +622,12 @@ def main():
                  "litellm_proxy/claude-3-5-sonnet-20241022", "litellm_proxy/gpt-4o-2024-05-13", "litellm_proxy/o3-mini-2025-01-31",
                  # cerebras
                  "cerebras/llama3-70b-instruct", "cerebras/llama-3.3-70b",
+                 
                  # gemini (Google) via LiteLLM
-                 "gemini/gemini-pro", "gemini/gemini-2.5-flash", "gemini/gemini-2.5-pro", "gemini/gemini-2.0-flash",
+                 "gemini/gemini-pro", "gemini/gemini-2.5-flash", "gemini/gemini-2.5-pro", 
+                 "gemini/gemini-2.0-flash", "gemini/gemini-2.0-flash-lite", "gemini/gemini-2.5-flash-lite",
+                 
+                 
                  # fine-tuned model
                  "openai/qwen-7B", "openai/qwen-7B-128k", "openai/ft-qwen-7B", "openai/ft-qwen-7B-128k",
                  "openai/qwen-32B", "openai/qwen-32B-128k", "openai/ft-qwen-32B", "openai/ft-qwen-32B-128k",

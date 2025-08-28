@@ -282,7 +282,7 @@ def resolve_symlink(file_path):
 
 # Traverse all the Python files under repo_path, construct dependency graphs 
 # with node types: directory, file, class, function
-def build_graph(repo_path, fuzzy_search=True, global_import=False):
+def build_graph(repo_path, fuzzy_search=True, global_import=False, files_only=False, include_imports=True):
     graph = nx.MultiDiGraph()
     file_nodes = {}
 
@@ -322,40 +322,56 @@ def build_graph(repo_path, fuzzy_search=True, global_import=False):
                 dir_has_py = True
 
                 # add file nodes
-                try:
-                    file_path = os.path.join(root, file)
-                    filename = os.path.relpath(file_path, repo_path)
-                    if os.path.islink(file_path):
-                        continue
-                    else:
-                        with open(file_path, 'r') as f:
-                            file_content = f.read()
-
-                    graph.add_node(filename, type=NODE_TYPE_FILE, code=file_content)
-                    file_nodes[filename] = file_path
-
-                    nodes = analyze_file(file_path)
-                except (UnicodeDecodeError, SyntaxError):
-                    # Skip the file that cannot decode or parse
+                file_path = os.path.join(root, file)
+                filename = os.path.relpath(file_path, repo_path)
+                if os.path.islink(file_path):
                     continue
 
-                # add function/class nodes
-                for node in nodes:
-                    full_name = f'{filename}:{node["name"]}'
-                    graph.add_node(full_name, type=node['type'], code=node['code'],
-                                   start_line=node['start_line'], end_line=node['end_line'])
+                # Always create file node with 'code' so downstream consumers can parse file-level data
+                try:
+                    with open(file_path, 'r') as f:
+                        file_content = f.read()
+                except UnicodeDecodeError:
+                    file_content = ""
+                # Provide pseudo file-level span for downstream logic
+                num_lines = file_content.count('\n') + (1 if file_content and not file_content.endswith('\n') else 0)
+                graph.add_node(
+                    filename,
+                    type=NODE_TYPE_FILE,
+                    code=file_content,
+                    start_line=1,
+                    end_line=max(1, num_lines),
+                )
+
+                file_nodes[filename] = file_path
+
+                nodes = []
+                if not files_only:
+                    try:
+                        nodes = analyze_file(file_path)
+                    except (UnicodeDecodeError, SyntaxError):
+                        # Skip the file that cannot decode or parse
+                        nodes = []
 
                 # add edges with type=contains
                 graph.add_edge(dirname, filename, type=EDGE_TYPE_CONTAINS)
-                for node in nodes:
-                    full_name = f'{filename}:{node["name"]}'
-                    name_list = node['name'].split('.')
-                    if len(name_list) == 1:
-                        graph.add_edge(filename, full_name, type=EDGE_TYPE_CONTAINS)
-                    else:
-                        parent_name = '.'.join(name_list[:-1])
-                        full_parent_name = f'{filename}:{parent_name}'
-                        graph.add_edge(full_parent_name, full_name, type=EDGE_TYPE_CONTAINS)
+
+                if not files_only:
+                    # add function/class nodes
+                    for node in nodes:
+                        full_name = f'{filename}:{node["name"]}'
+                        graph.add_node(full_name, type=node['type'], code=node['code'],
+                                       start_line=node['start_line'], end_line=node['end_line'])
+
+                    for node in nodes:
+                        full_name = f'{filename}:{node["name"]}'
+                        name_list = node['name'].split('.')
+                        if len(name_list) == 1:
+                            graph.add_edge(filename, full_name, type=EDGE_TYPE_CONTAINS)
+                        else:
+                            parent_name = '.'.join(name_list[:-1])
+                            full_parent_name = f'{filename}:{parent_name}'
+                            graph.add_edge(full_parent_name, full_name, type=EDGE_TYPE_CONTAINS)
 
         # keep all parent directories
         if dir_has_py:
@@ -370,12 +386,17 @@ def build_graph(repo_path, fuzzy_search=True, global_import=False):
         dir_include_stack.pop()
 
     ## add imports edges (file -> class/function)
-    for filename, filepath in file_nodes.items():
-        try:
-            imports = find_imports(filepath, repo_path)
-        except SyntaxError:
-            continue
-        add_imports(filename, imports, graph, repo_path)
+    if include_imports:
+        for filename, filepath in file_nodes.items():
+            try:
+                imports = find_imports(filepath, repo_path)
+            except (SyntaxError, UnicodeDecodeError):
+                continue
+            add_imports(filename, imports, graph, repo_path)
+
+    if files_only:
+        # Skip expensive per-class/function invoke/inherit analysis in files-only mode
+        return graph
 
     global_name_dict = defaultdict(list)
     if global_import:
@@ -738,9 +759,36 @@ def traverse_directory_structure(graph, root='/'):
     traverse(root, '', False)
 
 
+def list_python_files(repo_path: str):
+    files = []
+    for root, _, filenames in os.walk(repo_path):
+        dirname = os.path.relpath(root, repo_path)
+        if dirname != '.' and is_skip_dir(dirname):
+            continue
+        for name in filenames:
+            if not name.endswith('.py'):
+                continue
+            file_path = os.path.join(root, name)
+            if os.path.islink(file_path):
+                continue
+            files.append(os.path.relpath(file_path, repo_path))
+    return files
+
+
 def main():
+    # Fast path: just list Python file names and exit
+    if getattr(args, 'list_files', False):
+        for f in list_python_files(args.repo_path):
+            print(f)
+        return
+
     # Generate Dependency Graph
-    graph = build_graph(args.repo_path, global_import=args.global_import)
+    graph = build_graph(
+        args.repo_path,
+        global_import=args.global_import,
+        files_only=args.files_only,
+        include_imports=not args.no_imports,
+    )
 
     if args.visualize:
         visualize_graph(graph)
@@ -769,6 +817,9 @@ if __name__ == '__main__':
     parser.add_argument('--repo_path', type=str, default='DATA/repo/pallets__flask-5063')
     parser.add_argument('--visualize', action='store_true')
     parser.add_argument('--global_import', action='store_true')
+    parser.add_argument('--files_only', action='store_true', help='Build only directory/file nodes and file-level import edges (faster)')
+    parser.add_argument('--no_imports', action='store_true', help='Skip parsing import edges (fastest with --files_only)')
+    parser.add_argument('--list_files', action='store_true', help='Print Python file paths and exit (fastest; no graph built)')
     args = parser.parse_args()
 
     main()
